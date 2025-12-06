@@ -59,8 +59,8 @@ You should see `canvas_api_config.json` listed under "Untracked files" but it sh
 - `.gitignore` - Excludes sensitive files
 - `README.md` - Project documentation
 - `canvas_api_config.json.example` - Template config file
-- `retrieve_canvas_submissions.py` - Main retrieval script
-- `transform_canvas.py` - Transformation script
+- `canvas_api_v3.py` - Main API client and retrieval script
+- `canvas_transform_v3_to_v2.py` - Transformation script
 - `requirements.txt` - Python dependencies
 
 ## Files That Will NOT Be Committed (Protected by .gitignore)

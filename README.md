@@ -32,7 +32,7 @@ This project provides tools to retrieve submissions from the GoCanvas API and tr
 Retrieve submissions from the GoCanvas API:
 
 ```bash
-python retrieve_canvas_submissions.py
+python canvas_api_v3.py
 ```
 
 Options:
@@ -42,7 +42,7 @@ Options:
 - `-d, --days`: Number of days to look back (default: 7)
 - `--form-id`: Filter by form ID (overrides config file)
 - `-o, --output-file`: Output directory name (default: auto-generated timestamp)
-- `--log-file`: Log file path (default: retrieve_canvas_submissions.log)
+- `--log-file`: Log file path (default: canvas_api_v3.log)
 - `--log-level`: Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL (default: INFO)
 - `--config-file`: Path to config file (default: canvas_api_config.json)
 
@@ -57,14 +57,14 @@ The script will:
 Transform a single submission from v3 to v2 format:
 
 ```bash
-python transform_canvas.py
+python canvas_transform_v3_to_v2.py
 ```
 
 Options:
 - `-f, --form`: Path to form structure JSON file (default: Canvas_Sample_Form_Nested.json)
 - `-v, --v3`: Path to v3 submission JSON file (default: Canvas_v3.json)
 - `-o, --output`: Output file path (default: Canvas_v3_transformed.json)
-- `--log-file`: Log file path (default: transform_canvas.log)
+- `--log-file`: Log file path (default: canvas_transform_v3_to_v2.log)
 - `--log-level`: Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL (default: INFO)
 
 ## Output Structure
