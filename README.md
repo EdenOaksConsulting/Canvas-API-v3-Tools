@@ -1,4 +1,6 @@
-# Canvas API Submission Retrieval and Transformation
+# Canvas-API-v3-Tools
+
+Tools to address Canvas API migration from v2 to v3
 
 This project provides tools to retrieve submissions from the GoCanvas API and transform them from v3 format to v2 format.
 
@@ -78,5 +80,4 @@ When retrieving submissions, the script creates an output directory with:
 
 ## License
 
-[Add your license here]
-
+See LICENSE file for details.
