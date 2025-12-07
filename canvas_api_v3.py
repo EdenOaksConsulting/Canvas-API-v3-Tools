@@ -12,7 +12,7 @@ import logging
 import os
 import sys
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Union
 
 import requests
 
@@ -237,7 +237,8 @@ class CanvasAPIClient:
             raise
     
     def get_submissions(self, start_date: str = None, end_date: str = None, 
-                       form_id: int = None, page: int = 1, per_page: int = 100) -> Dict:
+                       form_id: int = None, page: int = 1, per_page: int = 100,
+                       all_pages: bool = False) -> Union[List[Dict], Dict]:
         """
         Retrieve submissions from GoCanvas API.
         
@@ -245,86 +246,77 @@ class CanvasAPIClient:
             start_date: Start date filter (YYYY-MM-DD format)
             end_date: End date filter (YYYY-MM-DD format)
             form_id: Filter by form ID (optional)
-            page: Page number for pagination
-            per_page: Number of results per page (max 100)
+            page: Page number for pagination (ignored if all_pages=True)
+            per_page: Number of results per page (max 100, ignored if all_pages=True)
+            all_pages: If True, automatically paginate and return all submissions as a list.
+                      If False, return a single page result (dict or list depending on API response)
             
         Returns:
-            Dictionary containing submissions and pagination info
+            If all_pages=True: List of all submissions
+            If all_pages=False: Dictionary containing submissions and pagination info (or list if API returns list)
         """
-        endpoint = "submissions"
-        params = {
-            'page': page,
-            'per_page': min(per_page, 100)  # API limit is 100
-        }
-        
-        if start_date:
-            params['start_date'] = start_date
-        if end_date:
-            params['end_date'] = end_date
-        if form_id:
-            params['form_id'] = form_id
-        
-        response = self._make_request('GET', endpoint, params=params)
-        return response.json()
-    
-    def get_all_submissions(self, start_date: str = None, end_date: str = None, 
-                           form_id: int = None) -> List[Dict]:
-        """
-        Retrieve all submissions with automatic pagination.
-        
-        Args:
-            start_date: Start date filter (YYYY-MM-DD format)
-            end_date: End date filter (YYYY-MM-DD format)
-            form_id: Filter by form ID (optional)
+        def _fetch_page(page_num: int, per_page_size: int) -> Union[Dict, List]:
+            """Helper method to fetch a single page of submissions."""
+            endpoint = "submissions"
+            params = {
+                'page': page_num,
+                'per_page': min(per_page_size, 100)  # API limit is 100
+            }
             
-        Returns:
-            List of all submissions
-        """
+            if start_date:
+                params['start_date'] = start_date
+            if end_date:
+                params['end_date'] = end_date
+            if form_id:
+                params['form_id'] = form_id
+            
+            response = self._make_request('GET', endpoint, params=params)
+            return response.json()
+        
+        # If all_pages is False, return single page result
+        if not all_pages:
+            return _fetch_page(page, per_page)
+        
+        # Otherwise, paginate through all pages
         all_submissions = []
-        page = 1
-        per_page = 100
+        current_page = 1
+        per_page_size = 100
         
         logger.info(f"Retrieving submissions from {start_date or 'beginning'} to {end_date or 'now'}")
         if form_id:
             logger.info(f"Filtering by form_id: {form_id}")
         
         while True:
-            logger.debug(f"Fetching page {page}...")
-            result = self.get_submissions(
-                start_date=start_date,
-                end_date=end_date,
-                form_id=form_id,
-                page=page,
-                per_page=per_page
-            )
+            logger.debug(f"Fetching page {current_page}...")
+            result = _fetch_page(current_page, per_page_size)
             
             # Handle different response formats
             if isinstance(result, list):
                 submissions = result
-                has_more = len(submissions) == per_page
+                has_more = len(submissions) == per_page_size
             elif isinstance(result, dict):
                 submissions = result.get('submissions', result.get('data', []))
                 # Check for pagination info
                 if 'pagination' in result:
                     pagination = result['pagination']
-                    has_more = pagination.get('current_page', page) < pagination.get('total_pages', 1)
+                    has_more = pagination.get('current_page', current_page) < pagination.get('total_pages', 1)
                 elif 'meta' in result:
                     meta = result['meta']
-                    has_more = meta.get('current_page', page) < meta.get('total_pages', 1)
+                    has_more = meta.get('current_page', current_page) < meta.get('total_pages', 1)
                 else:
                     # If no pagination info, assume more pages if we got a full page
-                    has_more = len(submissions) == per_page
+                    has_more = len(submissions) == per_page_size
             else:
                 submissions = []
                 has_more = False
             
             all_submissions.extend(submissions)
-            logger.info(f"Retrieved {len(submissions)} submissions from page {page} (total: {len(all_submissions)})")
+            logger.info(f"Retrieved {len(submissions)} submissions from page {current_page} (total: {len(all_submissions)})")
             
             if not has_more or len(submissions) == 0:
                 break
             
-            page += 1
+            current_page += 1
         
         logger.info(f"Total submissions retrieved: {len(all_submissions)}")
         return all_submissions
@@ -453,11 +445,11 @@ def process_submission(client: CanvasAPIClient, submission_summary: Dict,
         # Create filename
         submission_number = submission_summary.get('submission_number', '')
         if submission_number:
-            filename = f"submission_{submission_id}_{submission_number}.json"
+            v3_filename = f"submission_{submission_id}_{submission_number}_v3.json"
         else:
-            filename = f"submission_{submission_id}.json"
+            v3_filename = f"submission_{submission_id}_v3.json"
         
-        filepath = os.path.join(output_dir, filename)
+        filepath = os.path.join(output_dir, v3_filename)
         
         # Save v3 submission
         with open(filepath, 'w', encoding='utf-8') as f:
@@ -548,10 +540,11 @@ def main(username: str = None, password: str = None, bearer_token: str = None,
     
     # Retrieve submission list
     try:
-        submission_list = client.get_all_submissions(
+        submission_list = client.get_submissions(
             start_date=start_date,
             end_date=end_date,
-            form_id=form_id
+            form_id=form_id,
+            all_pages=True
         )
         
         if not submission_list:
