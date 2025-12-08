@@ -28,7 +28,7 @@ except ImportError:
 
 # Global logging configuration
 LOG_CONFIG = {
-    'level': 'INFO',  # Default log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+    'level': 'DEBUG',  # Default log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
     'file': 'canvas_api_v3.log',  # Log file name
 }
 
@@ -335,18 +335,25 @@ class CanvasAPIClient:
         response = self._make_request('GET', endpoint)
         return response.json()
     
-    def get_form_by_id(self, form_id: int) -> Dict:
+    def get_form_by_id(self, form_id: int, status: str = 'published', version: int = None) -> Dict:
         """
         Retrieve a form by ID (nested structure with sections, sheets, entries).
         
         Args:
             form_id: The unique form ID
+            status: Status filter (default: 'published', e.g., 'new', 'pending', 'published', 'archived', or 'testing')
+            version: Optional version number to retrieve
             
         Returns:
             Dictionary containing the full nested form data
         """
         endpoint = f"forms/{form_id}"
-        response = self._make_request('GET', endpoint)
+        params = {'status': status}
+        
+        if version is not None:
+            params['version'] = version
+        
+        response = self._make_request('GET', endpoint, params=params if params else None)
         return response.json()
 
 # ============================================================================
@@ -666,7 +673,7 @@ Examples:
     )
     
     parser.add_argument(
-        '--form-id',
+        '-f', '--form-id',
         dest='form_id',
         type=int,
         default=API_CONFIG.get('form_id'),
