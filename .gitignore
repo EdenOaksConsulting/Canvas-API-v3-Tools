@@ -43,6 +43,9 @@ canvas_submissions_*/
 submissions_*/
 output_*/
 
+# Working directory (query results)
+working/
+
 # OS
 .DS_Store
 Thumbs.db

@@ -226,6 +226,14 @@ def main(username: str = None, password: str = None, bearer_token: str = None,
                 else:
                     output_file = f'submission_list_{timestamp}.json'
             
+            # Write to working directory if output_file is a relative path (not absolute)
+            if not os.path.isabs(output_file):
+                # Create working directory if it doesn't exist
+                working_dir = 'working'
+                if not os.path.exists(working_dir):
+                    os.makedirs(working_dir)
+                output_file = os.path.join(working_dir, output_file)
+            
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(output_json)
             
