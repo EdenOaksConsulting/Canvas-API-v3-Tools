@@ -48,6 +48,10 @@ output_*/
 # Working directory (query results)
 working/
 
+# Test and archive directories
+Test/
+Old/
+
 # OS
 .DS_Store
 Thumbs.db
