@@ -40,7 +40,7 @@ Options:
 - `-p, --password`: GoCanvas password (overrides config file)
 - `--bearer-token`: OAuth Bearer token (overrides config file)
 - `-d, --days`: Number of days to look back (default: 7)
-- `--form-id`: Filter by form ID (overrides config file)
+- `-f, --form-id`: Filter by form ID (overrides config file)
 - `-o, --output-file`: Output directory name (default: auto-generated timestamp)
 - `--log-file`: Log file path (default: canvas_api_v3.log)
 - `--log-level`: Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL (default: INFO)
