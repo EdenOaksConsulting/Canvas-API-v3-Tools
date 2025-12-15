@@ -1,5 +1,7 @@
 # API Configuration (contains sensitive credentials)
 canvas_api_config.json
+canvas_api_config_*.json
+!canvas_api_config.json.example
 
 # Python
 __pycache__/
