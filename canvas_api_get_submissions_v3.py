@@ -58,7 +58,7 @@ def get_submission_by_id(client: CanvasAPIClient, submission_id: int) -> Dict:
     return response.json()
 
 
-def retrieve_form(client: CanvasAPIClient, form_id: int, output_dir: str) -> Optional[Dict]:
+def retrieve_form(client: CanvasAPIClient, form_id: int, output_dir: str, version: int = None) -> Optional[Dict]:
     """
     Retrieve a form from the API and save it to a file.
     
@@ -66,27 +66,37 @@ def retrieve_form(client: CanvasAPIClient, form_id: int, output_dir: str) -> Opt
         client: Canvas API client instance
         form_id: Form ID to retrieve
         output_dir: Output directory path
+        version: Optional version number to retrieve specific version
         
     Returns:
         Form data dictionary if successful, None otherwise
     """
     try:
-        logger.info(f"Retrieving form ID {form_id}...")
+        if version:
+            logger.info(f"Retrieving form ID {form_id}, version {version}...")
+        else:
+            logger.info(f"Retrieving form ID {form_id}...")
         endpoint = f"forms/{form_id}"
         params = {'status': 'published'}
+        if version is not None:
+            params['version'] = version
         response = client._make_request('GET', endpoint, params=params)
         form_data = response.json()
         
-        # Create filename using form ID and name
+        # Create filename using form ID, name, and version if specified
         form_name = form_data.get('name', 'Unknown')
-        filename = f"form_{form_id}_{sanitize_filename(form_name)}.json"
+        form_version = form_data.get('version', version)
+        if form_version:
+            filename = f"form_{form_id}_{sanitize_filename(form_name)}_v{form_version}.json"
+        else:
+            filename = f"form_{form_id}_{sanitize_filename(form_name)}.json"
         filepath = os.path.join(output_dir, filename)
         
         # Save to file
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(form_data, f, indent=3, ensure_ascii=False)
         
-        logger.info(f"Saved form {form_id} ({form_name}) to {filepath}")
+        logger.info(f"Saved form {form_id} ({form_name}, version {form_version}) to {filepath}")
         return form_data
         
     except Exception as e:
@@ -95,7 +105,7 @@ def retrieve_form(client: CanvasAPIClient, form_id: int, output_dir: str) -> Opt
 
 
 def process_submission(client: CanvasAPIClient, submission_summary: Dict, 
-                      output_dir: str, form_data: Optional[Dict] = None) -> tuple:
+                      output_dir: str, form_cache: Dict[int, Dict] = None) -> tuple:
     """
     Process a single submission: retrieve, save, and optionally transform.
     
@@ -103,7 +113,7 @@ def process_submission(client: CanvasAPIClient, submission_summary: Dict,
         client: Canvas API client instance
         submission_summary: Submission summary from list endpoint
         output_dir: Output directory path
-        form_data: Optional form data for transformation
+        form_cache: Optional dictionary to cache retrieved forms (key: form_id, value: form_data)
         
     Returns:
         Tuple of (success: bool, transformed: bool)
@@ -132,30 +142,51 @@ def process_submission(client: CanvasAPIClient, submission_summary: Dict,
         
         logger.debug(f"Saved submission {submission_id} to {filepath}")
         
-        # Transform to v2 format if form_data is available
+        # Get form_id from submission and retrieve form for transformation
+        submission_form_id = submission_summary.get('form_id') or full_submission.get('form_id')
+        form_data = None
         transformed = False
-        if form_data and transform_v3_to_v2:
-            try:
-                logger.info(f"Transforming submission {submission_id} to v2 format...")
-                v2_data = transform_v3_to_v2(full_submission, form_data)
-                
-                # Create v2 filename
-                if submission_number:
-                    v2_filename = f"submission_{submission_id}_{submission_number}_v2.json"
-                else:
-                    v2_filename = f"submission_{submission_id}_v2.json"
-                
-                v2_filepath = os.path.join(output_dir, v2_filename)
-                
-                # Save v2 file
-                with open(v2_filepath, 'w', encoding='utf-8') as f:
-                    json.dump(v2_data, f, indent=3, ensure_ascii=False)
-                
-                logger.info(f"Saved transformed submission {submission_id} to {v2_filepath}")
-                transformed = True
-                
-            except Exception as e:
-                logger.error(f"Error transforming submission {submission_id}: {e}")
+        
+        if submission_form_id and transform_v3_to_v2:
+            # Check cache first
+            if form_cache is not None and submission_form_id in form_cache:
+                form_data = form_cache[submission_form_id]
+                logger.debug(f"Using cached form data for form_id {submission_form_id}")
+            else:
+                # Retrieve form for this specific submission
+                try:
+                    logger.info(f"Retrieving form {submission_form_id} for submission {submission_id}...")
+                    form_data = retrieve_form(client, submission_form_id, output_dir)
+                    if form_data and form_cache is not None:
+                        form_cache[submission_form_id] = form_data
+                except Exception as e:
+                    logger.warning(f"Could not retrieve form {submission_form_id} for submission {submission_id}: {e}")
+            
+            # Transform to v2 format if form_data is available
+            if form_data:
+                try:
+                    logger.info(f"Transforming submission {submission_id} to v2 format...")
+                    v2_data = transform_v3_to_v2(full_submission, form_data)
+                    
+                    # Create v2 filename
+                    if submission_number:
+                        v2_filename = f"submission_{submission_id}_{submission_number}_v2.json"
+                    else:
+                        v2_filename = f"submission_{submission_id}_v2.json"
+                    
+                    v2_filepath = os.path.join(output_dir, v2_filename)
+                    
+                    # Save v2 file
+                    with open(v2_filepath, 'w', encoding='utf-8') as f:
+                        json.dump(v2_data, f, indent=3, ensure_ascii=False)
+                    
+                    logger.info(f"Saved transformed submission {submission_id} to {v2_filepath}")
+                    transformed = True
+                    
+                except Exception as e:
+                    logger.error(f"Error transforming submission {submission_id}: {e}")
+            else:
+                logger.warning(f"No form data available for submission {submission_id} (form_id: {submission_form_id}). Transformation skipped.")
         
         return True, transformed
         
@@ -165,16 +196,19 @@ def process_submission(client: CanvasAPIClient, submission_summary: Dict,
 
 
 def main(username: str = None, password: str = None, bearer_token: str = None,
-         days: int = 7, form_id: int = None, output_file: str = None,
+         days: int = None, start_date: str = None, end_date: str = None,
+         form_id: int = None, output_file: str = None,
          log_file: str = None, log_level: str = None, config_file: str = None):
     """
-    Retrieve submissions from GoCanvas API for the last N days.
+    Retrieve submissions from GoCanvas API for the last N days or specified date range.
     
     Args:
         username: GoCanvas username for Basic Auth
         password: GoCanvas password for Basic Auth
         bearer_token: OAuth Bearer token (alternative to username/password)
-        days: Number of days to look back (default: 7)
+        days: Number of days to look back (default: 7 if no date specified)
+        start_date: Start date filter (YYYY-MM-DD format)
+        end_date: End date filter (YYYY-MM-DD format)
         form_id: Optional form ID to filter submissions
         output_file: Path for output directory (each submission saved to unique file)
         log_file: Path for log file
@@ -191,6 +225,7 @@ def main(username: str = None, password: str = None, bearer_token: str = None,
     username = username or config.get('username')
     password = password or config.get('password')
     bearer_token = bearer_token or config.get('bearer_token')
+    form_id = form_id or config.get('form_id')  # form_id from config is used for filtering only
     form_id = form_id or config.get('form_id')
     
     # Set up logging
@@ -213,10 +248,22 @@ def main(username: str = None, password: str = None, bearer_token: str = None,
         os.makedirs(output_dir)
         logger.info(f"Created output directory: {output_dir}")
     
-    # Get date range
-    start_date, end_date = get_date_range(days)
-    logger.info(f"Retrieving submissions from last {days} days")
-    logger.info(f"Date range: {start_date} to {end_date}")
+    # Determine date range
+    if days is not None:
+        start_date, end_date = get_date_range(days)
+        logger.info(f"Using date range: {start_date} to {end_date} (last {days} days)")
+    elif not start_date and not end_date:
+        # Default to last 7 days if no date specified
+        start_date, end_date = get_date_range(7)
+        logger.info(f"Using default date range: {start_date} to {end_date} (last 7 days)")
+    else:
+        if start_date and end_date:
+            logger.info(f"Using date range: {start_date} to {end_date}")
+        elif start_date:
+            logger.info(f"Using start date: {start_date} (no end date)")
+        elif end_date:
+            logger.info(f"Using end date: {end_date} (no start date)")
+    
     logger.info(f"Output directory: {output_dir}")
     
     # Initialize API client
@@ -257,16 +304,8 @@ def main(username: str = None, password: str = None, bearer_token: str = None,
         
         logger.info(f"Retrieving full details for each submission...")
         
-        # Retrieve form from API_CONFIG (needed for transformation)
-        config_form_id = config.get('form_id')
-        form_data = None
-        
-        if config_form_id:
-            form_data = retrieve_form(client, config_form_id, output_dir)
-            if not form_data and transform_v3_to_v2:
-                logger.warning("Form retrieval failed. Transformation will be skipped.")
-        else:
-            logger.warning("No form_id specified in API_CONFIG. Form retrieval and transformation will be skipped.")
+        # Create form cache to avoid retrieving the same form multiple times
+        form_cache = {}
         
         # Process each submission
         successful = 0
@@ -276,13 +315,13 @@ def main(username: str = None, password: str = None, bearer_token: str = None,
         
         for idx, submission_summary in enumerate(submission_list, 1):
             logger.info(f"Processing submission {idx}/{len(submission_list)}: ID {submission_summary.get('id')}")
-            success, was_transformed = process_submission(client, submission_summary, output_dir, form_data)
+            success, was_transformed = process_submission(client, submission_summary, output_dir, form_cache)
             
             if success:
                 successful += 1
                 if was_transformed:
                     transformed += 1
-                elif form_data and transform_v3_to_v2:
+                elif transform_v3_to_v2:
                     transform_failed += 1
             else:
                 failed += 1
@@ -297,12 +336,11 @@ def main(username: str = None, password: str = None, bearer_token: str = None,
         logger.info(f"  Submission list saved to: {submission_list_filepath}")
         logger.info(f"  Submissions successfully retrieved: {successful}")
         logger.info(f"  Submissions failed: {failed}")
-        if form_data and transform_v3_to_v2:
+        if transform_v3_to_v2:
             logger.info(f"  Submissions transformed to v2: {transformed}")
             if transform_failed > 0:
                 logger.info(f"  Transformations failed: {transform_failed}")
-        if config_form_id:
-            logger.info(f"  Form retrieved: {config_form_id}")
+            logger.info(f"  Unique forms retrieved: {len(form_cache)}")
         logger.info(f"  Date range: {start_date} to {end_date}")
         if form_id:
             logger.info(f"  Form ID filter: {form_id}")
@@ -314,7 +352,7 @@ def main(username: str = None, password: str = None, bearer_token: str = None,
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description='Retrieve submissions from GoCanvas API for the last N days',
+        description='Retrieve submissions from GoCanvas API for the last N days or specified date range',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -326,6 +364,9 @@ Examples:
   
   # Retrieve last 14 days
   python canvas_api_get_submissions_v3.py -u user@example.com -p password --days 14
+  
+  # Retrieve with specific date range
+  python canvas_api_get_submissions_v3.py -u user@example.com -p password --start-date 2024-01-01 --end-date 2024-01-31
   
   # Filter by form ID
   python canvas_api_get_submissions_v3.py -u user@example.com -p password --form-id 12345
@@ -359,12 +400,27 @@ Examples:
         help='GoCanvas password (required if using username, default: from config file)'
     )
     
-    parser.add_argument(
+    # Date range options
+    date_group = parser.add_mutually_exclusive_group()
+    date_group.add_argument(
         '-d', '--days',
         dest='days',
         type=int,
-        default=7,
-        help='Number of days to look back (default: 7)'
+        default=None,
+        help='Number of days to look back (default: 7 if no date specified)'
+    )
+    date_group.add_argument(
+        '--start-date',
+        dest='start_date',
+        default=None,
+        help='Start date filter (YYYY-MM-DD format)'
+    )
+    
+    parser.add_argument(
+        '--end-date',
+        dest='end_date',
+        default=None,
+        help='End date filter (YYYY-MM-DD format, requires --start-date)'
     )
     
     parser.add_argument(
@@ -418,8 +474,12 @@ Examples:
     bearer_token = args.bearer_token if args.bearer_token else config.get('bearer_token')
     
     # Validate authentication
-    if username and not password:
+    if args.username and not args.password:
         parser.error("Password is required when using username authentication")
+    
+    # Validate date arguments
+    if args.end_date and not args.start_date:
+        parser.error("--end-date requires --start-date")
     
     # Ensure we have some form of authentication
     if not bearer_token and not (username and password):
@@ -430,6 +490,8 @@ Examples:
         password=password,
         bearer_token=bearer_token,
         days=args.days,
+        start_date=args.start_date,
+        end_date=args.end_date,
         form_id=args.form_id,
         output_file=args.output_file,
         log_file=args.log_file,
